@@ -25,3 +25,6 @@ staticcheck:
 
 clean:
 	rm -rf bin/*
+
+format-access-log:
+	@cat /var/log/nginx/access.log | alp ltsv --sort=sum -r

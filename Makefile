@@ -27,4 +27,21 @@ clean:
 	rm -rf bin/*
 
 format-access-log:
-	@cat /var/log/nginx/access.log | alp ltsv --sort=sum -r
+	@cat /var/log/nginx/access.log | alp ltsv --sort=max -r
+
+.PHONY: bench
+bench:
+	./bin/benchmarker --target-url=http://127.0.0.1:80
+
+load-nginx-conf:
+	sudo cp config/etc/nginx/nginx.conf /etc/nginx/nginx.conf
+	sudo systemctl restart nginx.service
+
+load-mysqld-conf:
+	sudo cp config/etc/mysql/my.cnf /etc/mysql/my.cnf
+	sudo systemctl restart mysql.service
+
+enable-slow-query:
+
+dump-slow-query:
+	sudo mysqldumpslow -s t /var/log/mysql/mysql-slow.log

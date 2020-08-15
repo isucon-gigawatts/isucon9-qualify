@@ -26,17 +26,20 @@ staticcheck:
 clean:
 	rm -rf bin/*
 
-format-access-log:
-	@cat /var/log/nginx/access.log | alp ltsv --sort=max -r
-
+## benchmerker
 .PHONY: bench
 bench:
 	./bin/benchmarker --target-url=http://127.0.0.1:80
 
+## Nginx
 load-nginx-conf:
 	sudo cp config/etc/nginx/nginx.conf /etc/nginx/nginx.conf
 	sudo systemctl restart nginx.service
 
+format-access-log:
+	@cat /var/log/nginx/access.log | alp ltsv --sort=max -r
+
+## MySQL
 load-mysqld-conf:
 	sudo cp config/etc/mysql/my.cnf /etc/mysql/my.cnf
 	sudo systemctl restart mysql.service

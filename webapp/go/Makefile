@@ -11,3 +11,6 @@ rebuild: *.go
 
 run: rebuild
 	./isucari
+
+vendor:
+	go mod vendor

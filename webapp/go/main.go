@@ -365,9 +365,23 @@ func main() {
 		dbname,
 	)
 
-	dbx, err = sqlx.Open("mysql", dsn)
-	if err != nil {
-		log.Fatalf("failed to connect to DB: %s.", err.Error())
+	if os.Getenv("ENABLE_TRACE") == "true" {
+		initTrace()
+
+		db, err := sql.Open(tracedDriver("mysql"), dsn)
+		if err != nil {
+			log.Fatalf("failed to connect to DB: %s.", err.Error())
+		}
+		dbx = sqlx.NewDb(db, "mysql")
+
+		fmt.Println("ENABLE_TRACE = true")
+	} else {
+		dbx, err = sqlx.Open("mysql", dsn)
+		if err != nil {
+			log.Fatalf("failed to connect to DB: %s.", err.Error())
+		}
+
+		fmt.Println("ENABLE_TRACE = false")
 	}
 	defer dbx.Close()
 
@@ -377,6 +391,19 @@ func main() {
 	}
 
 	mux := goji.NewMux()
+	var handler http.Handler
+	if os.Getenv("ENABLE_TRACE") == "true" {
+		handler = withTrace(mux)
+	} else {
+		handler = mux
+	}
+
+	if os.Getenv("ENABLE_PROFILE") == "true" {
+		initProfiler()
+		fmt.Println("ENABLE_PROFILE = true")
+	} else {
+		fmt.Println("ENABLE_PROFILE = false")
+	}
 
 	// API
 	mux.HandleFunc(pat.Post("/initialize"), postInitialize)
@@ -413,7 +440,7 @@ func main() {
 	mux.HandleFunc(pat.Get("/users/setting"), getIndex)
 	// Assets
 	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
-	log.Fatal(http.ListenAndServe(":8000", mux))
+	log.Fatal(http.ListenAndServe(":8000", handler))
 }
 
 func getSession(r *http.Request) *sessions.Session {

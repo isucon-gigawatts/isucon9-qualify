@@ -39,7 +39,7 @@ load-nginx-conf:
 setup-logrotate:
 	sudo cp config/etc/logrotate.d/nginx /etc/logrotate.d/
 	sudo /etc/init.d/nginx rotate
-	sudo systemctl restart nginx.service
+	sudo logrotate -fv /etc/logrotate.d/nginx
 
 format-access-log:
 	@cat /var/log/nginx/access.log | alp ltsv --sort=max -r

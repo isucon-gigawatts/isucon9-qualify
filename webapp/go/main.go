@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -451,12 +452,25 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	return user, http.StatusOK, ""
 }
 
-var userSimpleMap = map[int64]UserSimple{}
+// type UserSimpleMap struct {
+// 	v  map[int64]UserSimple
+// 	mu sync.Mutex
+// }
+
+// var userSimpleMap = UserSimpleMap{
+// 	v: map[int64]UserSimple{},
+// }
+
+var userSimpleMap sync.Map
 
 func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err error) {
-	if v, ok := userSimpleMap[userID]; ok {
-		return v, nil
+	// if v, ok := userSimpleMap.v[userID]; ok {
+	// 	return v, nil
+	// }
+	if v, ok := userSimpleMap.Load(userID); ok {
+		return v.(UserSimple), nil
 	}
+
 	user := User{}
 	err = sqlx.Get(q, &user, "SELECT * FROM `users` WHERE `id` = ?", userID)
 	if err != nil {
@@ -465,7 +479,8 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	userSimple.ID = user.ID
 	userSimple.AccountName = user.AccountName
 	userSimple.NumSellItems = user.NumSellItems
-	userSimpleMap[userID] = userSimple
+	// userSimpleMap.v[userID] = userSimple
+	userSimpleMap.Store(userID, userSimple)
 	return userSimple, err
 }
 
@@ -2123,12 +2138,15 @@ func postSell(w http.ResponseWriter, r *http.Request) {
 	}
 	tx.Commit()
 
-	if v, ok := userSimpleMap[seller.ID]; ok {
-		userSimpleMap[seller.ID] = UserSimple{
-			ID:           v.ID,
-			AccountName:  v.AccountName,
+	if v, ok := userSimpleMap.Load(seller.ID); ok {
+		// userSimpleMap.mu.Lock()
+		userSimple := v.(UserSimple)
+		userSimpleMap.Store(seller.ID, UserSimple{
+			ID:           userSimple.ID,
+			AccountName:  userSimple.AccountName,
 			NumSellItems: seller.NumSellItems + 1,
-		}
+		})
+		// userSimpleMap.mu.Unlock()
 	}
 
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")

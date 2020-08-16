@@ -474,7 +474,11 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	userSimple.ID = user.ID
 	userSimple.AccountName = user.AccountName
 	userSimple.NumSellItems = user.NumSellItems
+
+	userSimpleMap.mu.Lock()
 	userSimpleMap.us[userID] = userSimple
+	userSimpleMap.mu.Unlock()
+
 	return userSimple, err
 }
 

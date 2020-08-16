@@ -451,7 +451,12 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	return user, http.StatusOK, ""
 }
 
+var userSimpleMap = map[int64]UserSimple{}
+
 func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err error) {
+	if v, ok := userSimpleMap[userID]; ok {
+		return v, nil
+	}
 	user := User{}
 	err = sqlx.Get(q, &user, "SELECT * FROM `users` WHERE `id` = ?", userID)
 	if err != nil {
@@ -460,6 +465,7 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	userSimple.ID = user.ID
 	userSimple.AccountName = user.AccountName
 	userSimple.NumSellItems = user.NumSellItems
+	userSimpleMap[userID] = userSimple
 	return userSimple, err
 }
 
@@ -2116,6 +2122,14 @@ func postSell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tx.Commit()
+
+	if v, ok := userSimpleMap[seller.ID]; ok {
+		userSimpleMap[seller.ID] = UserSimple{
+			ID:           v.ID,
+			AccountName:  v.AccountName,
+			NumSellItems: seller.NumSellItems + 1,
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	json.NewEncoder(w).Encode(resSell{ID: itemID})

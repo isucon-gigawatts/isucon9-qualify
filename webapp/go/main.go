@@ -452,23 +452,18 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	return user, http.StatusOK, ""
 }
 
-// type UserSimpleMap struct {
-// 	v  map[int64]UserSimple
-// 	mu sync.Mutex
-// }
+type UserSimpleMap struct {
+	us map[int64]UserSimple
+	mu sync.Mutex
+}
 
-// var userSimpleMap = UserSimpleMap{
-// 	v: map[int64]UserSimple{},
-// }
-
-var userSimpleMap sync.Map
+var userSimpleMap = UserSimpleMap{
+	us: map[int64]UserSimple{},
+}
 
 func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err error) {
-	// if v, ok := userSimpleMap.v[userID]; ok {
-	// 	return v, nil
-	// }
-	if v, ok := userSimpleMap.Load(userID); ok {
-		return v.(UserSimple), nil
+	if v, ok := userSimpleMap.us[userID]; ok {
+		return v, nil
 	}
 
 	user := User{}
@@ -479,8 +474,7 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	userSimple.ID = user.ID
 	userSimple.AccountName = user.AccountName
 	userSimple.NumSellItems = user.NumSellItems
-	// userSimpleMap.v[userID] = userSimple
-	userSimpleMap.Store(userID, userSimple)
+	userSimpleMap.us[userID] = userSimple
 	return userSimple, err
 }
 
@@ -2138,15 +2132,14 @@ func postSell(w http.ResponseWriter, r *http.Request) {
 	}
 	tx.Commit()
 
-	if v, ok := userSimpleMap.Load(seller.ID); ok {
-		// userSimpleMap.mu.Lock()
-		userSimple := v.(UserSimple)
-		userSimpleMap.Store(seller.ID, UserSimple{
-			ID:           userSimple.ID,
-			AccountName:  userSimple.AccountName,
+	if v, ok := userSimpleMap.us[seller.ID]; ok {
+		userSimpleMap.mu.Lock()
+		userSimpleMap.us[seller.ID] = UserSimple{
+			ID:           v.ID,
+			AccountName:  v.AccountName,
 			NumSellItems: seller.NumSellItems + 1,
-		})
-		// userSimpleMap.mu.Unlock()
+		}
+		userSimpleMap.mu.Unlock()
 	}
 
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")

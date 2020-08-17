@@ -385,11 +385,6 @@ func main() {
 	}
 	defer dbx.Close()
 
-	err = prefetchCategories()
-	if err != nil {
-		log.Fatalf("failed to prefetch categories data from DB: %s.", err.Error())
-	}
-
 	mux := goji.NewMux()
 	var handler http.Handler
 	if os.Getenv("ENABLE_TRACE") == "true" {
@@ -440,6 +435,7 @@ func main() {
 	mux.HandleFunc(pat.Get("/users/setting"), getIndex)
 	// Assets
 	mux.Handle(pat.Get("/*"), http.FileServer(http.Dir("../public")))
+	fmt.Println("\nserver is runnning...")
 	log.Fatal(http.ListenAndServe(":8000", handler))
 }
 
@@ -479,18 +475,14 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	return user, http.StatusOK, ""
 }
 
-type UserSimpleMap struct {
-	us map[int64]UserSimple
-	mu sync.Mutex
-}
-
-var userSimpleMap = UserSimpleMap{
-	us: map[int64]UserSimple{},
-}
+var userSimpleMap = map[int64]*UserSimple{}
+var userSimpleMapMu = sync.RWMutex{}
 
 func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err error) {
-	if v, ok := userSimpleMap.us[userID]; ok {
-		return v, nil
+	userSimpleMapMu.RLock()
+	if v, ok := userSimpleMap[userID]; ok {
+		userSimpleMapMu.RUnlock()
+		return *v, nil
 	}
 
 	user := User{}
@@ -502,9 +494,9 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	userSimple.AccountName = user.AccountName
 	userSimple.NumSellItems = user.NumSellItems
 
-	userSimpleMap.mu.Lock()
-	userSimpleMap.us[userID] = userSimple
-	userSimpleMap.mu.Unlock()
+	userSimpleMapMu.Lock()
+	userSimpleMap[userID] = &userSimple
+	userSimpleMapMu.Unlock()
 
 	return userSimple, err
 }
@@ -591,6 +583,28 @@ func postInitialize(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
 		return
+	}
+
+	userSimpleMapMu.Lock()
+	defer userSimpleMapMu.Unlock()
+	users := []*User{}
+	err = dbx.Select(&users, "SELECT * FROM users")
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
+	}
+	for _, user := range users {
+		userSimpleMap[user.ID] = &UserSimple{
+			ID:           user.ID,
+			AccountName:  user.AccountName,
+			NumSellItems: user.NumSellItems,
+		}
+	}
+
+	err = prefetchCategories()
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
 	}
 
 	res := resInitialize{
@@ -2163,14 +2177,14 @@ func postSell(w http.ResponseWriter, r *http.Request) {
 	}
 	tx.Commit()
 
-	if v, ok := userSimpleMap.us[seller.ID]; ok {
-		userSimpleMap.mu.Lock()
-		userSimpleMap.us[seller.ID] = UserSimple{
+	if v, ok := userSimpleMap[seller.ID]; ok {
+		userSimpleMapMu.Lock()
+		userSimpleMap[seller.ID] = &UserSimple{
 			ID:           v.ID,
 			AccountName:  v.AccountName,
 			NumSellItems: seller.NumSellItems + 1,
 		}
-		userSimpleMap.mu.Unlock()
+		userSimpleMapMu.Unlock()
 	}
 
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")

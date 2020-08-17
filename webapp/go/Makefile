@@ -6,8 +6,6 @@ export GOOGLE_APPLICATION_CREDENTIALS=/home/ikedamorito/isucon-gigawatts-06b12dc
 
 CAMPAIGN=0
 
-all: isucari
-
 rebuild: *.go
 	@sed -i -e 's/Campaign: [01234]/Campaign: ${CAMPAIGN}/g' main.go
 	@echo "### ENVIOROMENT INFO ###"

@@ -465,6 +465,15 @@ func getCSRFToken(r *http.Request) string {
 	return csrfToken.(string)
 }
 
+func getUserID(r *http.Request) (userID int64, errCode int, errMsg string) {
+	session := getSession(r)
+	if _, ok := session.Values["user_id"]; !ok {
+		return userID, http.StatusNotFound, "no session"
+	}
+
+	return session.Values["user_id"].(int64), http.StatusOK, ""
+}
+
 func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	session := getSession(r)
 	userID, ok := session.Values["user_id"]
@@ -971,7 +980,7 @@ func getUserItems(w http.ResponseWriter, r *http.Request) {
 
 func getTransactions(w http.ResponseWriter, r *http.Request) {
 
-	user, errCode, errMsg := getUser(r)
+	userID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1024,8 +1033,8 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		LIMIT ?
 		`
 		err := tx.Select(&items, sql,
-			user.ID,
-			user.ID,
+			userID,
+			userID,
 			// ItemStatusOnSale,
 			// ItemStatusTrading,
 			// ItemStatusSoldOut,
@@ -1067,8 +1076,8 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		LIMIT ?
 		`
 		err := tx.Select(&items, sql,
-			user.ID,
-			user.ID,
+			userID,
+			userID,
 			// ItemStatusOnSale,
 			// ItemStatusTrading,
 			// ItemStatusSoldOut,
@@ -1196,7 +1205,7 @@ func getItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, errCode, errMsg := getUser(r)
+	userID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1245,7 +1254,7 @@ func getItem(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: item.CreatedAt.Unix(),
 	}
 
-	if (user.ID == item.SellerID || user.ID == item.BuyerID) && item.BuyerID != 0 {
+	if (userID == item.SellerID || userID == item.BuyerID) && item.BuyerID != 0 {
 		buyer, err := getUserSimpleByID(dbx, item.BuyerID)
 		if err != nil {
 			outputErrorMsg(w, http.StatusNotFound, "buyer not found")

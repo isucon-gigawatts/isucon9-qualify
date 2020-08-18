@@ -67,6 +67,7 @@ var (
 )
 
 var categoriesMap = map[int]Category{}
+var categoriesParentIDMap = map[int][]int{}
 
 type Config struct {
 	Name string `json:"name" db:"name"`
@@ -310,6 +311,14 @@ func prefetchCategories() error {
 			}
 			tmp = categoriesMap[tmp.ParentID]
 		}
+	}
+
+	for _, val := range categoriesMap {
+		if _, ok := categoriesParentIDMap[val.ParentID]; ok {
+			categoriesParentIDMap[val.ParentID] = append(categoriesParentIDMap[val.ParentID], val.ID)
+			continue
+		}
+		categoriesParentIDMap[val.ParentID] = []int{val.ID}
 	}
 
 	return nil
@@ -728,13 +737,20 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var categoryIDs []int
-	err = dbx.Select(&categoryIDs, "SELECT id FROM `categories` WHERE parent_id=?", rootCategory.ID)
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		return
-	}
+	var categoryIDs = categoriesParentIDMap[rootCategory.ID]
+
+	// for _, val := range categoriesMap {
+	// 	if val.ParentID == rootCategory.ID {
+	// 		categoryIDs = append(categoryIDs, val.ID)
+	// 	}
+	// }
+
+	// err = dbx.Select(&categoryIDs, "SELECT id FROM `categories` WHERE parent_id=?", rootCategory.ID)
+	// if err != nil {
+	// 	log.Print(err)
+	// 	outputErrorMsg(w, http.StatusInternalServerError, "db error")
+	// 	return
+	// }
 
 	query := r.URL.Query()
 	itemIDStr := query.Get("item_id")
@@ -1114,7 +1130,7 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		transactionEvidence := TransactionEvidence{}
-		err = tx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", item.ID)
+		err = tx.Get(&transactionEvidence, "SELECT id, status FROM `transaction_evidences` WHERE `item_id` = ?", item.ID)
 		if err != nil && err != sql.ErrNoRows {
 			// It's able to ignore ErrNoRows
 			log.Print(err)

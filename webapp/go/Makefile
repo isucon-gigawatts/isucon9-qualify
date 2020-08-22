@@ -6,15 +6,18 @@ export GOOGLE_APPLICATION_CREDENTIALS=/home/ikedamorito/isucon-gigawatts-06b12dc
 
 CAMPAIGN=0
 
-rebuild: *.go
+.PHONY: build
+build: *.go
 	@sed -i -e 's/Campaign: [01234]/Campaign: ${CAMPAIGN}/g' main.go
 	@echo "### ENVIOROMENT INFO ###"
 	@echo CAMPAIGN = ${CAMPAIGN}
 	@go build -o isucari
 	@sed -i -e 's/Campaign: [01234]/Campaign: 0/g' main.go
 
-run: rebuild
+.PHONY: run
+run: build
 	@./isucari
 
+.PHONY: vendor
 vendor:
 	go mod vendor

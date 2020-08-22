@@ -374,7 +374,10 @@ func main() {
 		dbname,
 	)
 
-	if os.Getenv("ENABLE_TRACE") == "true" {
+	enableTrace := os.Getenv("ENABLE_TRACE")
+	enableProfile := os.Getenv("ENABLE_PROFILE")
+
+	if enableTrace == "true" {
 		initTrace()
 
 		db, err := sql.Open(tracedDriver("mysql"), dsn)
@@ -382,31 +385,24 @@ func main() {
 			log.Fatalf("failed to connect to DB: %s.", err.Error())
 		}
 		dbx = sqlx.NewDb(db, "mysql")
-
-		fmt.Println("ENABLE_TRACE = true")
 	} else {
 		dbx, err = sqlx.Open("mysql", dsn)
 		if err != nil {
 			log.Fatalf("failed to connect to DB: %s.", err.Error())
 		}
-
-		fmt.Println("ENABLE_TRACE = false")
 	}
 	defer dbx.Close()
 
 	mux := goji.NewMux()
 	var handler http.Handler
-	if os.Getenv("ENABLE_TRACE") == "true" {
+	if enableTrace == "true" {
 		handler = withTrace(mux)
 	} else {
 		handler = mux
 	}
 
-	if os.Getenv("ENABLE_PROFILE") == "true" {
+	if enableProfile == "true" {
 		initProfiler()
-		fmt.Println("ENABLE_PROFILE = true")
-	} else {
-		fmt.Println("ENABLE_PROFILE = false")
 	}
 
 	// API
@@ -625,9 +621,15 @@ func postInitialize(w http.ResponseWriter, r *http.Request) {
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
 	}
 
+	campaign, err := strconv.Atoi(os.Getenv("CAMPAIGN"))
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "CAMPAIGN should be a number")
+		return
+	}
 	res := resInitialize{
 		// キャンペーン実施時には還元率の設定を返す。詳しくはマニュアルを参照のこと。
-		Campaign: 0,
+		Campaign: campaign,
 		// 実装言語を返す
 		Language: "Go",
 	}

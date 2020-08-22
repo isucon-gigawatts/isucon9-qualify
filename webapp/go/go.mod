@@ -1,10 +1,10 @@
 module github.com/isucon/isucon9-qualify/webapp/go
 
-go 1.12
+go 1.14
 
 require (
-	cloud.google.com/go v0.63.0
-	contrib.go.opencensus.io/exporter/stackdriver v0.13.2
+	cloud.google.com/go v0.64.0
+	contrib.go.opencensus.io/exporter/stackdriver v0.13.3
 	contrib.go.opencensus.io/integrations/ocsql v0.1.6
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/gorilla/sessions v1.2.0

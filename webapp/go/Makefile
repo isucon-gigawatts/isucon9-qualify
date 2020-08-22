@@ -5,6 +5,8 @@ export ENABLE_PROFILE=true
 export GOOGLE_APPLICATION_CREDENTIALS=/home/${USER}/serviceaccount-key.json
 export CAMPAIGN=0
 
+export MYSQL_HOST=34.85.74.24
+
 .PHONY: build
 build: *.go
 	@echo "### ENVIOROMENT INFO ###"

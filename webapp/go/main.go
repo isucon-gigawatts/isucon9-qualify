@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -178,6 +177,8 @@ type TransactionEvidence struct {
 	ItemRootCategoryID int       `json:"item_root_category_id" db:"item_root_category_id"`
 	CreatedAt          time.Time `json:"-" db:"created_at"`
 	UpdatedAt          time.Time `json:"-" db:"updated_at"`
+
+	ShippingStatus string `json:"-" db:"shipping_status"`
 }
 
 type Shipping struct {
@@ -483,7 +484,15 @@ func prefetchEvidences(q sqlx.Queryer, itemIDs []int64) (map[int64]TransactionEv
 	output := make(map[int64]TransactionEvidence)
 
 	var evidences []TransactionEvidence
-	sql, params, err := sqlx.In("SELECT * FROM `transaction_evidences` WHERE item_id IN (?)", itemIDs)
+	baseQuery := `
+	SELECT
+ 		te.*,
+ 		s.status AS shipping_status  
+	FROM transaction_evidences as te
+	JOIN shippings AS s ON s.transaction_evidence_id = te.id
+	WHERE te.item_id IN (?)
+	`
+	sql, params, err := sqlx.In(baseQuery, itemIDs)
 	if err != nil {
 		return output, err
 	}
@@ -1137,48 +1146,6 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 	for _, evidence := range evidences {
 		evidenceIDs = append(evidenceIDs, evidence.ID)
 	}
-	shippings, err := prefetchShipping(tx, evidenceIDs)
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		tx.Rollback()
-		return
-	}
-
-	// api request concurrency
-	var wg sync.WaitGroup
-	var shipmentStatues sync.Map
-	var concurrentError atomic.Value
-	wg.Add(len(evidences))
-	for _, shipping := range shippings {
-		go func(shipping Shipping) {
-			defer wg.Done()
-
-			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
-				ReserveID: shipping.ReserveID,
-			})
-			if err != nil {
-				concurrentError.Store(err)
-				return
-			}
-			shipmentStatues.Store(shipping.ReserveID, ssr)
-		}(shipping)
-	}
-	wg.Wait()
-	cerr := concurrentError.Load()
-	if cerr != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
-		tx.Rollback()
-		return
-	}
-
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
-		tx.Rollback()
-		return
-	}
 
 	itemDetails := []ItemDetail{}
 	for _, item := range items {
@@ -1222,23 +1189,9 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if transactionEvidence.ID > 0 {
-			shipping, ok := shippings[transactionEvidence.ID]
-			if !ok {
-				log.Printf("failed to fetch this shipping list %#v", shippings)
-				outputErrorMsg(w, http.StatusNotFound, fmt.Sprintf("shipping not found by id: %d", transactionEvidence.ID))
-				tx.Rollback()
-				return
-			}
-			ssr, ok := shipmentStatues.Load(shipping.ReserveID)
-			if !ok {
-				outputErrorMsg(w, http.StatusNotFound, "shipping status not found")
-				tx.Rollback()
-				return
-			}
-
 			itemDetail.TransactionEvidenceID = transactionEvidence.ID
 			itemDetail.TransactionEvidenceStatus = transactionEvidence.Status
-			itemDetail.ShippingStatus = ssr.(*APIShipmentStatusRes).Status
+			itemDetail.ShippingStatus = transactionEvidence.ShippingStatus
 		}
 
 		itemDetails = append(itemDetails, itemDetail)

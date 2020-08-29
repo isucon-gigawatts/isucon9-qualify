@@ -1334,7 +1334,7 @@ func postItemEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seller, errCode, errMsg := getUser(r)
+	sellerID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1353,7 +1353,7 @@ func postItemEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if targetItem.SellerID != seller.ID {
+	if targetItem.SellerID != sellerID {
 		outputErrorMsg(w, http.StatusForbidden, "自分の商品以外は編集できません")
 		return
 	}
@@ -1414,7 +1414,7 @@ func getQRCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seller, errCode, errMsg := getUser(r)
+	sellerID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1432,7 +1432,7 @@ func getQRCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if transactionEvidence.SellerID != seller.ID {
+	if transactionEvidence.SellerID != sellerID {
 		outputErrorMsg(w, http.StatusForbidden, "権限がありません")
 		return
 	}
@@ -1669,7 +1669,7 @@ func postShip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seller, errCode, errMsg := getUser(r)
+	sellerID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1688,7 +1688,7 @@ func postShip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if transactionEvidence.SellerID != seller.ID {
+	if transactionEvidence.SellerID != sellerID {
 		outputErrorMsg(w, http.StatusForbidden, "権限がありません")
 		return
 	}
@@ -1800,7 +1800,7 @@ func postShipDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seller, errCode, errMsg := getUser(r)
+	sellerID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1819,7 +1819,7 @@ func postShipDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if transactionEvidence.SellerID != seller.ID {
+	if transactionEvidence.SellerID != sellerID {
 		outputErrorMsg(w, http.StatusForbidden, "権限がありません")
 		return
 	}
@@ -1946,7 +1946,7 @@ func postComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buyer, errCode, errMsg := getUser(r)
+	buyerID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -1965,7 +1965,7 @@ func postComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if transactionEvidence.BuyerID != buyer.ID {
+	if transactionEvidence.BuyerID != buyerID {
 		outputErrorMsg(w, http.StatusForbidden, "権限がありません")
 		return
 	}
@@ -2132,7 +2132,7 @@ func postSell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, errCode, errMsg := getUser(r)
+	userID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -2167,7 +2167,7 @@ func postSell(w http.ResponseWriter, r *http.Request) {
 	tx := dbx.MustBegin()
 
 	seller := User{}
-	err = tx.Get(&seller, "SELECT * FROM `users` WHERE `id` = ? FOR UPDATE", user.ID)
+	err = tx.Get(&seller, "SELECT * FROM `users` WHERE `id` = ? FOR UPDATE", userID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "user not found")
 		tx.Rollback()
@@ -2256,7 +2256,7 @@ func postBump(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, errCode, errMsg := getUser(r)
+	userID, errCode, errMsg := getUserID(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
 		return
@@ -2278,14 +2278,14 @@ func postBump(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if targetItem.SellerID != user.ID {
+	if targetItem.SellerID != userID {
 		outputErrorMsg(w, http.StatusForbidden, "自分の商品以外は編集できません")
 		tx.Rollback()
 		return
 	}
 
 	seller := User{}
-	err = tx.Get(&seller, "SELECT * FROM `users` WHERE `id` = ? FOR UPDATE", user.ID)
+	err = tx.Get(&seller, "SELECT * FROM `users` WHERE `id` = ? FOR UPDATE", userID)
 	if err == sql.ErrNoRows {
 		outputErrorMsg(w, http.StatusNotFound, "user not found")
 		tx.Rollback()

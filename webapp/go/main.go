@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -14,7 +15,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
-	"errors"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
@@ -101,7 +101,7 @@ type Item struct {
 	UpdatedAt   time.Time `json:"-" db:"updated_at"`
 }
 
-func FetchCategoryIDs (items []Item) []int {
+func FetchCategoryIDs(items []Item) []int {
 	var o []int
 
 	for _, item := range items {
@@ -111,7 +111,7 @@ func FetchCategoryIDs (items []Item) []int {
 	return o
 }
 
-func FetchSellerIDs (items []Item) []int64 {
+func FetchSellerIDs(items []Item) []int64 {
 	var o []int64
 
 	for _, item := range items {
@@ -121,7 +121,7 @@ func FetchSellerIDs (items []Item) []int64 {
 	return o
 }
 
-func FetchIDs (items []Item) []int64 {
+func FetchItemIDs(items []Item) []int64 {
 	var o []int64
 
 	for _, item := range items {
@@ -449,6 +449,34 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	return user, http.StatusOK, ""
 }
 
+func prefetchShipping(q sqlx.Queryer, evidenceIDs []int64) (map[int64]Shipping, error) {
+	output := make(map[int64]Shipping)
+
+	if len(evidenceIDs) == 0 {
+		return output, nil
+	}
+
+	var shippings []Shipping
+	sql, params, err := sqlx.In("SELECT * FROM `shippings` WHERE `transaction_evidence_id` IN (?)", evidenceIDs)
+	if err != nil {
+		return output, err
+	}
+	if err := sqlx.Select(q, &shippings, sql, params...); err != nil {
+		return output, err
+	}
+
+	for _, evidenceID := range evidenceIDs {
+		for _, shipping := range shippings {
+			if shipping.TransactionEvidenceID == evidenceID {
+				output[evidenceID] = shipping
+				break
+			}
+		}
+	}
+
+	return output, nil
+}
+
 func prefetchEvidences(q sqlx.Queryer, itemIDs []int64) (map[int64]TransactionEvidence, error) {
 	output := make(map[int64]TransactionEvidence)
 
@@ -483,13 +511,13 @@ func prefetchUserSimples(q sqlx.Queryer, userIDs []int64) (map[int64]UserSimple,
 	if err := sqlx.Select(q, &users, sql, params...); err != nil {
 		return us, err
 	}
-	
+
 	for _, id := range userIDs {
 		for _, hit := range users {
 			if hit.ID == id {
 				us[id] = UserSimple{
-					ID: hit.ID,
-					AccountName: hit.AccountName,
+					ID:           hit.ID,
+					AccountName:  hit.AccountName,
 					NumSellItems: hit.NumSellItems,
 				}
 				break
@@ -536,7 +564,7 @@ func prefetchCategoriesByID(categoryIDs []int) (map[int]Category, error) {
 		return output, err
 	}
 
-	for _,  id := range categoryIDs {
+	for _, id := range categoryIDs {
 		hit, err := categories.Search(id)
 		if err != nil {
 			return output, err
@@ -1080,7 +1108,7 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		tx.Rollback()
 		return
 	}
-	evendences, err := prefetchEvidences(tx, FetchIDs(items))
+	evidences, err := prefetchEvidences(tx, FetchItemIDs(items))
 	if err != nil {
 		// It's able to ignore ErrNoRows
 		log.Print(err)
@@ -1088,7 +1116,17 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		tx.Rollback()
 		return
 	}
-
+	evidenceIDs := make([]int64, len(evidences))
+	for _, evidence := range evidences {
+		evidenceIDs = append(evidenceIDs, evidence.ID)
+	}
+	shippings, err := prefetchShipping(tx, evidenceIDs)
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
+		tx.Rollback()
+		return
+	}
 
 	itemDetails := []ItemDetail{}
 	for _, item := range items {
@@ -1125,23 +1163,17 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 			itemDetail.Buyer = &buyer
 		}
 
-		transactionEvidence, ok := evendences[item.ID]
+		transactionEvidence, ok := evidences[item.ID]
 		if !ok {
 			// It's able to ignore ErrNoRows
 			transactionEvidence = TransactionEvidence{}
 		}
 
 		if transactionEvidence.ID > 0 {
-			shipping := Shipping{}
-			err = tx.Get(&shipping, "SELECT * FROM `shippings` WHERE `transaction_evidence_id` = ?", transactionEvidence.ID)
-			if err == sql.ErrNoRows {
-				outputErrorMsg(w, http.StatusNotFound, "shipping not found")
-				tx.Rollback()
-				return
-			}
-			if err != nil {
-				log.Print(err)
-				outputErrorMsg(w, http.StatusInternalServerError, "db error")
+			shipping, ok := shippings[transactionEvidence.ID]
+			if !ok {
+				log.Printf("failed to fetch this shipping list %#v", shippings)
+				outputErrorMsg(w, http.StatusNotFound, fmt.Sprintf("shipping not found by id: %d", transactionEvidence.ID))
 				tx.Rollback()
 				return
 			}

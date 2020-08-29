@@ -121,6 +121,16 @@ func FetchSellerIDs (items []Item) []int64 {
 	return o
 }
 
+func FetchIDs (items []Item) []int64 {
+	var o []int64
+
+	for _, item := range items {
+		o = append(o, item.ID)
+	}
+
+	return o
+}
+
 type ItemSimple struct {
 	ID         int64       `json:"id"`
 	SellerID   int64       `json:"seller_id"`
@@ -437,6 +447,29 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	}
 
 	return user, http.StatusOK, ""
+}
+
+func prefetchEvidences(q sqlx.Queryer, itemIDs []int64) (map[int64]TransactionEvidence, error) {
+	output := make(map[int64]TransactionEvidence)
+
+	var evidences []TransactionEvidence
+	sql, params, err := sqlx.In("SELECT * FROM `transaction_evidences` WHERE item_id IN (?)", itemIDs)
+	if err != nil {
+		return output, err
+	}
+	if err := sqlx.Select(q, &evidences, sql, params...); err != nil {
+		return output, err
+	}
+
+	for _, itemID := range itemIDs {
+		for _, evidence := range evidences {
+			if evidence.ItemID == itemID {
+				output[itemID] = evidence
+				break
+			}
+		}
+	}
+	return output, nil
 }
 
 func prefetchUserSimples(q sqlx.Queryer, userIDs []int64) (map[int64]UserSimple, error) {
@@ -963,7 +996,6 @@ func getUserItems(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTransactions(w http.ResponseWriter, r *http.Request) {
-
 	user, errCode, errMsg := getUser(r)
 	if errMsg != "" {
 		outputErrorMsg(w, errCode, errMsg)
@@ -1048,6 +1080,15 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		tx.Rollback()
 		return
 	}
+	evendences, err := prefetchEvidences(tx, FetchIDs(items))
+	if err != nil {
+		// It's able to ignore ErrNoRows
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "db error")
+		tx.Rollback()
+		return
+	}
+
 
 	itemDetails := []ItemDetail{}
 	for _, item := range items {
@@ -1084,14 +1125,10 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 			itemDetail.Buyer = &buyer
 		}
 
-		transactionEvidence := TransactionEvidence{}
-		err = tx.Get(&transactionEvidence, "SELECT * FROM `transaction_evidences` WHERE `item_id` = ?", item.ID)
-		if err != nil && err != sql.ErrNoRows {
+		transactionEvidence, ok := evendences[item.ID]
+		if !ok {
 			// It's able to ignore ErrNoRows
-			log.Print(err)
-			outputErrorMsg(w, http.StatusInternalServerError, "db error")
-			tx.Rollback()
-			return
+			transactionEvidence = TransactionEvidence{}
 		}
 
 		if transactionEvidence.ID > 0 {

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+	"errors"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
@@ -98,6 +99,16 @@ type Item struct {
 	CategoryID  int       `json:"category_id" db:"category_id"`
 	CreatedAt   time.Time `json:"-" db:"created_at"`
 	UpdatedAt   time.Time `json:"-" db:"updated_at"`
+}
+
+func FetchCategoryIDs (items []Item) []int {
+	var o []int
+
+	for _, item := range items {
+		o = append(o, item.CategoryID)
+	}
+
+	return o
 }
 
 type ItemSimple struct {
@@ -430,6 +441,50 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 	return userSimple, err
 }
 
+type Categories []Category
+
+func (c *Categories) Search(id int) (Category, error) {
+	for _, category := range *c {
+		if category.ID == id {
+			return category, nil
+		}
+	}
+	return Category{}, errors.New("category not found")
+}
+
+func prefetchCategoriesByID(categoryIDs []int) (map[int]Category, error) {
+	output := make(map[int]Category)
+	var categories Categories
+
+	if len(categoryIDs) == 0 {
+		return output, nil
+	}
+
+	// select count(1) from categories -- 43 より、検索条件はなし
+	if err := dbx.Select(&categories, "SELECT * FROM `categories`"); err != nil {
+		return output, err
+	}
+
+	for _,  id := range categoryIDs {
+		hit, err := categories.Search(id)
+		if err != nil {
+			return output, err
+		}
+		if hit.ParentID != 0 {
+			parent, err := categories.Search(hit.ParentID)
+			if err != nil {
+				return output, err
+			}
+			hit.ParentCategoryName = parent.CategoryName
+		}
+
+		output[id] = hit
+	}
+	return output, nil
+
+}
+
+// getCategoryByID() replaced to prefetchCategoriesByID() in loop function.
 func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err error) {
 	err = sqlx.Get(q, &category, "SELECT * FROM `categories` WHERE `id` = ?", categoryID)
 	if category.ParentID != 0 {
@@ -554,7 +609,7 @@ func getNewItems(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	items := []Item{}
+	var items []Item
 	if itemID > 0 && createdAt > 0 {
 		// paging
 		err := dbx.Select(&items,
@@ -587,17 +642,19 @@ func getNewItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemSimples := []ItemSimple{}
+	categories, err := prefetchCategoriesByID(FetchCategoryIDs(items))
+	if err != nil {
+		outputErrorMsg(w, http.StatusNotFound, "category not found")
+		return
+	}
 	for _, item := range items {
+		// Fixme N+1
 		seller, err := getUserSimpleByID(dbx, item.SellerID)
 		if err != nil {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
 			return
 		}
-		category, err := getCategoryByID(dbx, item.CategoryID)
-		if err != nil {
-			outputErrorMsg(w, http.StatusNotFound, "category not found")
-			return
-		}
+		category := categories[item.CategoryID]
 		itemSimples = append(itemSimples, ItemSimple{
 			ID:         item.ID,
 			SellerID:   item.SellerID,
@@ -713,7 +770,11 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
 		return
 	}
-
+	categories, err := prefetchCategoriesByID(FetchCategoryIDs(items))
+	if err != nil {
+		outputErrorMsg(w, http.StatusNotFound, "category not found")
+		return
+	}
 	itemSimples := []ItemSimple{}
 	for _, item := range items {
 		seller, err := getUserSimpleByID(dbx, item.SellerID)
@@ -721,11 +782,7 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 			outputErrorMsg(w, http.StatusNotFound, "seller not found")
 			return
 		}
-		category, err := getCategoryByID(dbx, item.CategoryID)
-		if err != nil {
-			outputErrorMsg(w, http.StatusNotFound, "category not found")
-			return
-		}
+		category := categories[item.CategoryID]
 		itemSimples = append(itemSimples, ItemSimple{
 			ID:         item.ID,
 			SellerID:   item.SellerID,
@@ -828,14 +885,14 @@ func getUserItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
+	categories, err := prefetchCategoriesByID(FetchCategoryIDs(items))
+	if err != nil {
+		outputErrorMsg(w, http.StatusNotFound, "category not found")
+		return
+	}
 	itemSimples := []ItemSimple{}
 	for _, item := range items {
-		category, err := getCategoryByID(dbx, item.CategoryID)
-		if err != nil {
-			outputErrorMsg(w, http.StatusNotFound, "category not found")
-			return
-		}
+		category := categories[item.CategoryID]
 		itemSimples = append(itemSimples, ItemSimple{
 			ID:         item.ID,
 			SellerID:   item.SellerID,
@@ -940,6 +997,12 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	categories, err := prefetchCategoriesByID(FetchCategoryIDs(items))
+	if err != nil {
+		outputErrorMsg(w, http.StatusNotFound, "category not found")
+		tx.Rollback()
+		return
+	}
 
 	itemDetails := []ItemDetail{}
 	for _, item := range items {
@@ -949,12 +1012,7 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 			tx.Rollback()
 			return
 		}
-		category, err := getCategoryByID(tx, item.CategoryID)
-		if err != nil {
-			outputErrorMsg(w, http.StatusNotFound, "category not found")
-			tx.Rollback()
-			return
-		}
+		category := categories[item.CategoryID]
 
 		itemDetail := ItemDetail{
 			ID:       item.ID,

@@ -67,6 +67,11 @@ var (
 	store     sessions.Store
 )
 
+var (
+	// in-memory cache categories
+	allCategories Categories
+)
+
 type Config struct {
 	Name string `json:"name" db:"name"`
 	Val  string `json:"val" db:"val"`
@@ -366,6 +371,9 @@ func main() {
 	}
 	defer dbx.Close()
 
+	// load in-memory
+	initialLoadCategories()
+
 	mux := goji.NewMux()
 	var handler http.Handler
 	if enableTrace == "true" {
@@ -452,34 +460,6 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	return user, http.StatusOK, ""
 }
 
-func prefetchShipping(q sqlx.Queryer, evidenceIDs []int64) (map[int64]Shipping, error) {
-	output := make(map[int64]Shipping)
-
-	if len(evidenceIDs) == 0 {
-		return output, nil
-	}
-
-	var shippings []Shipping
-	sql, params, err := sqlx.In("SELECT * FROM `shippings` WHERE `transaction_evidence_id` IN (?)", evidenceIDs)
-	if err != nil {
-		return output, err
-	}
-	if err := sqlx.Select(q, &shippings, sql, params...); err != nil {
-		return output, err
-	}
-
-	for _, evidenceID := range evidenceIDs {
-		for _, shipping := range shippings {
-			if shipping.TransactionEvidenceID == evidenceID {
-				output[evidenceID] = shipping
-				break
-			}
-		}
-	}
-
-	return output, nil
-}
-
 func prefetchEvidences(q sqlx.Queryer, itemIDs []int64) (map[int64]TransactionEvidence, error) {
 	output := make(map[int64]TransactionEvidence)
 
@@ -562,26 +542,31 @@ func (c *Categories) Search(id int) (Category, error) {
 	return Category{}, errors.New("category not found")
 }
 
+func initialLoadCategories() error {
+	var categories Categories
+
+	if err := dbx.Select(&categories, "SELECT * FROM `categories`"); err != nil {
+		return err
+	}
+	allCategories = categories
+
+	return nil
+}
+
 func prefetchCategoriesByID(categoryIDs []int) (map[int]Category, error) {
 	output := make(map[int]Category)
-	var categories Categories
 
 	if len(categoryIDs) == 0 {
 		return output, nil
 	}
 
-	// select count(1) from categories -- 43 より、検索条件はなし
-	if err := dbx.Select(&categories, "SELECT * FROM `categories`"); err != nil {
-		return output, err
-	}
-
 	for _, id := range categoryIDs {
-		hit, err := categories.Search(id)
+		hit, err := allCategories.Search(id)
 		if err != nil {
 			return output, err
 		}
 		if hit.ParentID != 0 {
-			parent, err := categories.Search(hit.ParentID)
+			parent, err := allCategories.Search(hit.ParentID)
 			if err != nil {
 				return output, err
 			}
@@ -595,10 +580,13 @@ func prefetchCategoriesByID(categoryIDs []int) (map[int]Category, error) {
 }
 
 // getCategoryByID() replaced to prefetchCategoriesByID() in loop function.
-func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err error) {
-	err = sqlx.Get(q, &category, "SELECT * FROM `categories` WHERE `id` = ?", categoryID)
+func getCategoryByID(categoryID int) (category Category, err error) {
+	category, err = allCategories.Search(categoryID)
+	if err != nil {
+		return Category{}, err
+	}
 	if category.ParentID != 0 {
-		parentCategory, err := getCategoryByID(q, category.ParentID)
+		parentCategory, err := allCategories.Search(category.ParentID)
 		if err != nil {
 			return category, err
 		}
@@ -802,7 +790,7 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rootCategory, err := getCategoryByID(dbx, rootCategoryID)
+	rootCategory, err := getCategoryByID(rootCategoryID)
 	if err != nil || rootCategory.ParentID != 0 {
 		outputErrorMsg(w, http.StatusNotFound, "category not found")
 		return
@@ -1240,7 +1228,7 @@ func getItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	category, err := getCategoryByID(dbx, item.CategoryID)
+	category, err := getCategoryByID(item.CategoryID)
 	if err != nil {
 		outputErrorMsg(w, http.StatusNotFound, "category not found")
 		return
@@ -1528,7 +1516,7 @@ func postBuy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	category, err := getCategoryByID(tx, targetItem.CategoryID)
+	category, err := getCategoryByID(targetItem.CategoryID)
 	if err != nil {
 		log.Print(err)
 
@@ -2137,7 +2125,7 @@ func postSell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	category, err := getCategoryByID(dbx, categoryID)
+	category, err := getCategoryByID(categoryID)
 	if err != nil || category.ParentID == 0 {
 		log.Print(categoryID, category)
 		outputErrorMsg(w, http.StatusBadRequest, "Incorrect category ID")
@@ -2360,16 +2348,7 @@ func getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ress.PaymentServiceURL = getPaymentServiceURL()
-
-	categories := []Category{}
-
-	err := dbx.Select(&categories, "SELECT * FROM `categories`")
-	if err != nil {
-		log.Print(err)
-		outputErrorMsg(w, http.StatusInternalServerError, "db error")
-		return
-	}
-	ress.Categories = categories
+	ress.Categories = allCategories
 
 	w.Header().Set("Content-Type", "application/json;charset=utf-8")
 	json.NewEncoder(w).Encode(ress)

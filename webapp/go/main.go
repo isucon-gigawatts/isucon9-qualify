@@ -111,6 +111,16 @@ func FetchCategoryIDs (items []Item) []int {
 	return o
 }
 
+func FetchSellerIDs (items []Item) []int64 {
+	var o []int64
+
+	for _, item := range items {
+		o = append(o, item.SellerID)
+	}
+
+	return o
+}
+
 type ItemSimple struct {
 	ID         int64       `json:"id"`
 	SellerID   int64       `json:"seller_id"`
@@ -429,6 +439,34 @@ func getUser(r *http.Request) (user User, errCode int, errMsg string) {
 	return user, http.StatusOK, ""
 }
 
+func prefetchUserSimples(q sqlx.Queryer, userIDs []int64) (map[int64]UserSimple, error) {
+	us := make(map[int64]UserSimple)
+
+	var users []User
+	sql, params, err := sqlx.In("SELECT * FROM `users` WHERE id IN (?)", userIDs)
+	if err != nil {
+		return us, err
+	}
+	if err := sqlx.Select(q, &users, sql, params...); err != nil {
+		return us, err
+	}
+	
+	for _, id := range userIDs {
+		for _, hit := range users {
+			if hit.ID == id {
+				us[id] = UserSimple{
+					ID: hit.ID,
+					AccountName: hit.AccountName,
+					NumSellItems: hit.NumSellItems,
+				}
+				break
+			}
+		}
+	}
+	return us, nil
+}
+
+// getUserSimpleByID() replaced by prefetchUserSimples() in loop functions.
 func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err error) {
 	user := User{}
 	err = sqlx.Get(q, &user, "SELECT * FROM `users` WHERE `id` = ?", userID)
@@ -647,13 +685,13 @@ func getNewItems(w http.ResponseWriter, r *http.Request) {
 		outputErrorMsg(w, http.StatusNotFound, "category not found")
 		return
 	}
+	sellers, err := prefetchUserSimples(dbx, FetchSellerIDs(items))
+	if err != nil {
+		outputErrorMsg(w, http.StatusNotFound, "seller not found")
+		return
+	}
 	for _, item := range items {
-		// Fixme N+1
-		seller, err := getUserSimpleByID(dbx, item.SellerID)
-		if err != nil {
-			outputErrorMsg(w, http.StatusNotFound, "seller not found")
-			return
-		}
+		seller := sellers[item.SellerID]
 		category := categories[item.CategoryID]
 		itemSimples = append(itemSimples, ItemSimple{
 			ID:         item.ID,
@@ -770,6 +808,11 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 		outputErrorMsg(w, http.StatusInternalServerError, "db error")
 		return
 	}
+	sellers, err := prefetchUserSimples(dbx, FetchSellerIDs(items))
+	if err != nil {
+		outputErrorMsg(w, http.StatusNotFound, "seller not found")
+		return
+	}
 	categories, err := prefetchCategoriesByID(FetchCategoryIDs(items))
 	if err != nil {
 		outputErrorMsg(w, http.StatusNotFound, "category not found")
@@ -777,11 +820,7 @@ func getNewCategoryItems(w http.ResponseWriter, r *http.Request) {
 	}
 	itemSimples := []ItemSimple{}
 	for _, item := range items {
-		seller, err := getUserSimpleByID(dbx, item.SellerID)
-		if err != nil {
-			outputErrorMsg(w, http.StatusNotFound, "seller not found")
-			return
-		}
+		seller := sellers[item.SellerID]
 		category := categories[item.CategoryID]
 		itemSimples = append(itemSimples, ItemSimple{
 			ID:         item.ID,
@@ -1003,15 +1042,16 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		tx.Rollback()
 		return
 	}
+	sellers, err := prefetchUserSimples(tx, FetchSellerIDs(items))
+	if err != nil {
+		outputErrorMsg(w, http.StatusNotFound, "seller not found")
+		tx.Rollback()
+		return
+	}
 
 	itemDetails := []ItemDetail{}
 	for _, item := range items {
-		seller, err := getUserSimpleByID(tx, item.SellerID)
-		if err != nil {
-			outputErrorMsg(w, http.StatusNotFound, "seller not found")
-			tx.Rollback()
-			return
-		}
+		seller := sellers[item.SellerID]
 		category := categories[item.CategoryID]
 
 		itemDetail := ItemDetail{

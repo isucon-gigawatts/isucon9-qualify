@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -1143,6 +1145,41 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// api request concurrency
+	var wg sync.WaitGroup
+	var shipmentStatues sync.Map
+	var concurrentError atomic.Value
+	wg.Add(len(evidences))
+	for _, shipping := range shippings {
+		go func(shipping Shipping) {
+			defer wg.Done()
+
+			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
+				ReserveID: shipping.ReserveID,
+			})
+			if err != nil {
+				concurrentError.Store(err)
+				return
+			}
+			shipmentStatues.Store(shipping.ReserveID, ssr)
+		}(shipping)
+	}
+	wg.Wait()
+	cerr := concurrentError.Load()
+	if cerr != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
+		tx.Rollback()
+		return
+	}
+
+	if err != nil {
+		log.Print(err)
+		outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
+		tx.Rollback()
+		return
+	}
+
 	itemDetails := []ItemDetail{}
 	for _, item := range items {
 		seller := sellers[item.SellerID]
@@ -1192,19 +1229,16 @@ func getTransactions(w http.ResponseWriter, r *http.Request) {
 				tx.Rollback()
 				return
 			}
-			ssr, err := APIShipmentStatus(getShipmentServiceURL(), &APIShipmentStatusReq{
-				ReserveID: shipping.ReserveID,
-			})
-			if err != nil {
-				log.Print(err)
-				outputErrorMsg(w, http.StatusInternalServerError, "failed to request to shipment service")
+			ssr, ok := shipmentStatues.Load(shipping.ReserveID)
+			if !ok {
+				outputErrorMsg(w, http.StatusNotFound, "shipping status not found")
 				tx.Rollback()
 				return
 			}
 
 			itemDetail.TransactionEvidenceID = transactionEvidence.ID
 			itemDetail.TransactionEvidenceStatus = transactionEvidence.Status
-			itemDetail.ShippingStatus = ssr.Status
+			itemDetail.ShippingStatus = ssr.(*APIShipmentStatusRes).Status
 		}
 
 		itemDetails = append(itemDetails, itemDetail)

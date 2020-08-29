@@ -12,4 +12,5 @@ require (
 	go.opencensus.io v0.22.4
 	goji.io v2.0.2+incompatible
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	google.golang.org/appengine v1.6.6 // indirect
 )

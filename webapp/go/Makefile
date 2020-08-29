@@ -1,9 +1,11 @@
 export GO111MODULE=on
 export GOOGLE_CLOUD_PROJECT=isucon-gigawatts
-export ENABLE_TRACE=true
-export ENABLE_PROFILE=true
+export ENABLE_TRACE=false
+export ENABLE_PROFILE=false
 export GOOGLE_APPLICATION_CREDENTIALS=/home/${USER}/serviceaccount-key.json
 export CAMPAIGN=0
+
+export MYSQL_HOST=35.221.81.140
 
 .PHONY: build
 build: *.go

@@ -370,6 +370,9 @@ func main() {
 		}
 	}
 	defer dbx.Close()
+	dbx.SetConnMaxLifetime(10 * time.Second)
+	dbx.SetMaxIdleConns(512)
+	dbx.SetMaxOpenConns(512)
 
 	// load in-memory
 	initialLoadCategories()

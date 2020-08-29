@@ -167,7 +167,7 @@ type Category struct {
 	ID                 int    `json:"id" db:"id"`
 	ParentID           int    `json:"parent_id" db:"parent_id"`
 	CategoryName       string `json:"category_name" db:"category_name"`
-	ParentCategoryName string `json:"parent_category_name,omitempty" db:"-"`
+	ParentCategoryName string `json:"parent_category_name,omitempty" db:"parent_category_name"`
 }
 
 type reqInitialize struct {
@@ -332,6 +332,10 @@ func main() {
 	}
 	defer dbx.Close()
 
+	dbx.SetConnMaxLifetime(10 * time.Second)
+	dbx.SetMaxIdleConns(512)
+	dbx.SetMaxOpenConns(512)
+
 	mux := goji.NewMux()
 	var handler http.Handler
 	if enableTrace == "true" {
@@ -431,13 +435,22 @@ func getUserSimpleByID(q sqlx.Queryer, userID int64) (userSimple UserSimple, err
 }
 
 func getCategoryByID(q sqlx.Queryer, categoryID int) (category Category, err error) {
-	err = sqlx.Get(q, &category, "SELECT * FROM `categories` WHERE `id` = ?", categoryID)
-	if category.ParentID != 0 {
-		parentCategory, err := getCategoryByID(q, category.ParentID)
-		if err != nil {
-			return category, err
-		}
-		category.ParentCategoryName = parentCategory.CategoryName
+	var tmpC struct {
+		ID                 int            `json:"id" db:"id"`
+		ParentID           int            `json:"parent_id" db:"parent_id"`
+		CategoryName       string         `json:"category_name" db:"category_name"`
+		ParentCategoryName sql.NullString `json:"parent_category_name,omitempty" db:"parent_category_name"`
+	}
+
+	err = sqlx.Get(q, &tmpC, "SELECT c.id, c.parent_id, c.category_name, p.category_name as parent_category_name FROM categories as c LEFT JOIN categories as p ON c.parent_id = p.id WHERE c.id = ?", categoryID)
+	if err != nil {
+		return category, err
+	}
+	category = Category{
+		ID:                 tmpC.ID,
+		ParentID:           tmpC.ParentID,
+		CategoryName:       tmpC.CategoryName,
+		ParentCategoryName: tmpC.ParentCategoryName.String,
 	}
 	return category, err
 }

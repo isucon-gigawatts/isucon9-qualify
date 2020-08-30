@@ -15,7 +15,7 @@ import (
 func initProfiler() {
 	if err := profiler.Start(profiler.Config{
 		Service:        "isucon9-pon",
-		ServiceVersion: "3.0.0",
+		ServiceVersion: "3.0.1",
 		ProjectID:      os.Getenv("GOOGLE_CLOUD_PROJECT"),
 	}); err != nil {
 		log.Fatal(err)
